@@ -88,7 +88,7 @@ typedef uint64_t            port_stkalign_t;
  * @note    If the compiler does not support such attribute then some
  *          time-dependent services could be degraded.
  */
-#define NOINLINE            CC_NO_INLINE
+#define NOINLINE            __attribute__((noinline))
 
 /**
  * @brief   Memory alignment enforcement for variables.
