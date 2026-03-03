@@ -28,6 +28,16 @@
 #include <string.h>
 
 #include "hal.h"
+#include "spi_hook.h"
+#define spiStart        spiStartHook
+#define spiStop         spiStopHook
+#define spiAcquireBus   spiAcquireBusHook
+#define spiReleaseBus   spiReleaseBusHook
+#define spiSelect       spiSelectHook
+#define spiUnselect     spiUnselectHook
+#define spiIgnore       spiIgnoreHook
+#define spiSend         spiSendHook
+#define spiReceive      spiReceiveHook
 
 #if (HAL_USE_MMC_SPI == TRUE) || defined(__DOXYGEN__)
 
@@ -319,7 +329,7 @@ static bool mmc_wait_idle(MMCDriver *mmcp) {
 static bool mmc_send_hdr(MMCDriver *mmcp, uint8_t cmd, uint32_t arg) {
 
   /* Wait for the bus to become idle if a write operation was in progress.*/
-  if (mmc_wait_idle(mmcp) == HAL_FAILED) {
+  if (cmd != MMCSD_CMD_GO_IDLE_STATE && mmc_wait_idle(mmcp) == HAL_FAILED) {
     return HAL_FAILED;
   }
 
