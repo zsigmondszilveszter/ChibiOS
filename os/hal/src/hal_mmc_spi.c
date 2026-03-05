@@ -28,6 +28,10 @@
 #include <string.h>
 
 #include "hal.h"
+
+#if (HAL_USE_MMC_SPI == TRUE) || defined(__DOXYGEN__)
+
+#ifdef HAL_SDCARD_SPI_HOOK
 #include "spi_hook.h"
 #define spiStart        spiStartHook
 #define spiStop         spiStopHook
@@ -38,8 +42,7 @@
 #define spiIgnore       spiIgnoreHook
 #define spiSend         spiSendHook
 #define spiReceive      spiReceiveHook
-
-#if (HAL_USE_MMC_SPI == TRUE) || defined(__DOXYGEN__)
+#endif
 
 /*===========================================================================*/
 /* Driver local definitions.                                                 */
