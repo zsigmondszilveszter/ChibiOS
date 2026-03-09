@@ -17,10 +17,10 @@
 */
 
 /**
- * @file    ARMv8-M-ML/smp/rp2/chcoresmp.h
- * @brief   ARMv8-M-ML-RP2 SMP macros and structures.
+ * @file    ARMv8-M-ML-ALT/smp/rp2/chcoresmp.h
+ * @brief   ARMv8-M-ML-ALT-RP2 SMP macros and structures.
  *
- * @addtogroup ARMV8M_ML_CORE_SMP_RP2
+ * @addtogroup ARMV8M_ML_ALT_CORE_SMP_RP2
  * @{
  */
 

@@ -17,10 +17,10 @@
 */
 
 /**
- * @file    ARMv8-M-ML/smp/rp2/chcoresmp_timer.h
+ * @file    ARMv8-M-ML-ALT/smp/rp2/chcoresmp_timer.h
  * @brief   System timer header file.
  *
- * @addtogroup ARMV8M_ML_SMP_RP2_TIMER
+ * @addtogroup ARMV8M_ML_ALT_SMP_RP2_TIMER
  * @{
  */
 
