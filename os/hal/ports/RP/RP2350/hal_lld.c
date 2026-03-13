@@ -17,6 +17,8 @@
 /**
  * @file    RP2350/hal_lld.c
  * @brief   RP2350 HAL subsystem low level driver source.
+ * @note    The Core 1 launch sequence follows the multicore launch protocol
+ *          documented in RP2350 Datasheet 3.5 "Multicore Launch".
  *
  * @addtogroup HAL
  * @{
@@ -103,6 +105,9 @@ void hal_lld_init(void) {
   irqInit();
 #if defined(RP_DMA_REQUIRED)
   dmaInit();
+#endif
+#if defined(RP_PIO_REQUIRED)
+  pioInit();
 #endif
 
   /* Bind the system timer IRQ to this core for tickless mode. */

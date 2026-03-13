@@ -1,5 +1,5 @@
 /*
-    ChibiOS - Copyright (C) 2006..2025 Giovanni Di Sirio
+    ChibiOS - Copyright (C) 2006-2026 Giovanni Di Sirio.
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -169,8 +169,11 @@
 
 /**
  * @brief   EFL1 driver identifier.
+ * @note    EFLD1.ssi is statically initialized to allow use before hal init
  */
-EFlashDriver EFLD1;
+EFlashDriver EFLD1 = {
+  .ssi = (volatile uint32_t *)RP_SSI_BASE
+};
 
 /*===========================================================================*/
 /* Driver local variables and types.                                         */
@@ -606,7 +609,6 @@ void efl_lld_init(void) {
 
   /* Driver initialization. */
   eflObjectInit(&EFLD1);
-  EFLD1.ssi = (volatile uint32_t *)RP_SSI_BASE;
 }
 
 /**
@@ -919,13 +921,12 @@ flash_error_t efl_lld_verify_erase(void *instance, flash_sector_t sector) {
  */
 void efl_lld_read_unique_id(EFlashDriver *eflp, uint8_t *uid) {
   uint8_t rx[4U + RP_FLASH_UNIQUE_ID_SIZE];
-  syssts_t sts;
 
   osalDbgCheck((eflp != NULL) && (uid != NULL));
 
-  sts = osalSysGetStatusAndLockX();
+  osalSysLock();
   rp_flash_read_uid_full(eflp, rx, sizeof(rx));
-  osalSysRestoreStatusX(sts);
+  osalSysUnlock();
 
   memcpy(uid, rx + 4U, RP_FLASH_UNIQUE_ID_SIZE);
 }

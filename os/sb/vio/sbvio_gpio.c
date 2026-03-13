@@ -86,7 +86,7 @@ void sb_fastc_vio_gpio(sb_class_t *sbp, struct port_extctx *ectxp) {
   case SB_VGPIO_CLEAR:
     if ((unitp->permissions & VIO_GPIO_PERM_WRITE) != 0U) {
       uint32_t val = palReadGroup(unitp->port, unitp->mask, unitp->offset);
-      palWriteGroup(unitp->port, unitp->mask, unitp->offset, ectxp->r1 & ~val);
+      palWriteGroup(unitp->port, unitp->mask, unitp->offset, val & ~ectxp->r1);
     }
     break;
   case SB_VGPIO_TOGGLE:
@@ -107,7 +107,13 @@ void sb_fastc_vio_gpio(sb_class_t *sbp, struct port_extctx *ectxp) {
     break;
   case SB_VGPIO_SETMODE:
     if ((unitp->permissions & VIO_GPIO_PERM_SETMODE) != 0U) {
-      /* TODO */
+      ioportmask_t mask = (ioportmask_t)ectxp->r1;
+      uint32_t offset = ectxp->r2;
+
+      if (((mask << offset) & ~unitp->mask) == 0U) {
+        palSetGroupMode(unitp->port, mask, (unitp->offset + offset),
+                        (iomode_t)ectxp->r3);
+      }
     }
     break;
   default:
