@@ -147,6 +147,18 @@
 #define PORT_INT_REQUIRED_STACK         256
 #endif
 
+/**
+ * @brief   Makes the system tick a responsibility of the local ST layer.
+ * @details If set to @p TRUE then the sandbox core port owns VRQ0 and
+ *          programs the host alarm directly. If set to @p FALSE then the
+ *          timer setup is delegated to the local HAL ST implementation.
+ * @note    The default is @p TRUE in order to preserve configurations not
+ *          using HAL/XHAL ST support.
+ */
+#if !defined(PORT_USE_LOCAL_SYSTICK) || defined(__DOXYGEN__)
+#define PORT_USE_LOCAL_SYSTICK          FALSE
+#endif
+
 /*===========================================================================*/
 /* Derived constants and error checks.                                       */
 /*===========================================================================*/
@@ -395,6 +407,24 @@ static inline bool port_irq_enabled(syssts_t sts) {
 
   return (bool)((sts & 1U) == (syssts_t)0);
 }
+
+/**
+ * @brief   Returns a word encoding the current lock status.
+ *
+ * @return              The lock status.
+ */
+#define port_get_lock_status()               port_get_irq_status()
+
+/**
+ * @brief   Checks the lock status.
+ *
+ * @param[in] sts       status word returned by @p port_get_lock_status()
+ *
+ * @return              The lock status.
+ * @retval false        if the lock is currently released
+ * @retval true         if the lock is currently held
+ */
+#define port_is_locked(sts)                  (!port_irq_enabled(sts))
 
 /**
  * @brief   Determines the current execution context.

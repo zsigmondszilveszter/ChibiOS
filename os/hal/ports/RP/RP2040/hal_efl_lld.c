@@ -27,6 +27,7 @@
 #include <string.h>
 
 #include "hal.h"
+#include "rp_efl_lld.h"
 
 #if (HAL_USE_EFL == TRUE) || defined(__DOXYGEN__)
 
@@ -80,17 +81,6 @@
 /** @} */
 
 /**
- * @name    SSI configuration for XIP mode
- * @{
- */
-/* SPI_FRF=0 DFS_32=31 TMOD=3 */
-#define SSI_CTRLR0_XIP                      0x001F0300U
-
-/* XIP_CMD=0x03 INST_L=2 ADDR_L=6 TRANS_TYPE=0 */
-#define SSI_SPI_CTRLR0_XIP                  0x03000218U
-/** @} */
-
-/**
  * @name    IO QSPI base and register offsets
  * @{
  */
@@ -112,6 +102,7 @@
  * @{
  */
 #define XIP_CTRL                            0x00U
+#define XIP_CTRL_EN                         1U
 #define XIP_FLUSH                           0x04U
 #define XIP_STAT                            0x08U
 /** @} */
@@ -145,6 +136,8 @@
 #define FLASHCMD_READ_STATUS                0x05U
 #define FLASHCMD_PAGE_PROGRAM               0x02U
 #define FLASHCMD_SECTOR_ERASE               0x20U
+#define FLASHCMD_BLOCK_ERASE_32K            0x52U
+#define FLASHCMD_BLOCK_ERASE_64K            0xD8U
 #define FLASHCMD_READ_UNIQUE_ID             0x4BU
 /** @} */
 
@@ -169,24 +162,22 @@
 
 /**
  * @brief   EFL1 driver identifier.
+ * @note    EFLD1.ssi is statically initialized to allow use before hal init
  */
-EFlashDriver EFLD1;
+EFlashDriver EFLD1 = {
+  .ssi = (volatile uint32_t *)RP_SSI_BASE
+};
 
 /*===========================================================================*/
 /* Driver local variables and types.                                         */
 /*===========================================================================*/
 
-static const flash_descriptor_t efl_lld_descriptor = {
-  .attributes       = FLASH_ATTR_ERASED_IS_ONE |
-                      FLASH_ATTR_MEMORY_MAPPED |
-                      FLASH_ATTR_REWRITABLE,
-  .page_size        = RP_FLASH_PAGE_SIZE,
-  .sectors_count    = RP_FLASH_SECTORS_COUNT,
-  .sectors          = NULL,
-  .sectors_size     = RP_FLASH_SECTOR_SIZE,
-  .address          = (uint8_t *)RP_FLASH_BASE,
-  .size             = RP_FLASH_SIZE
-};
+/**
+ * @brief   Copy of boot2 stage2 image for XIP restoration after flash ops.
+ * @details 252 bytes (full 256-byte image minus 4-byte CRC).
+ *          See RP2040 Datasheet 2.8.1.3 and rp_flash_enter_xip().
+ */
+CC_ALIGN_DATA(4) static uint8_t rp_boot2[252];
 
 /*===========================================================================*/
 /* Driver local functions.                                                   */
@@ -310,15 +301,18 @@ RAMFUNC static void rp_flash_write_enable(EFlashDriver *eflp) {
  */
 RAMFUNC static void rp_flash_flush_cache(void) {
   volatile uint32_t *xip = (volatile uint32_t *)RP_XIP_CTRL_BASE;
+  uint32_t ctrl;
 
   /* Write to flush register to trigger cache flush. */
   xip[XIP_FLUSH / 4U] = 1U;
 
-  __DSB();
-  __ISB();
+  /* Read back blocks until flush is complete. */
+  (void)xip[XIP_FLUSH / 4U];
 
-  /* Enable the cache */
-  xip[XIP_CTRL / 4U] = 1U;
+  /* Re-enable the cache while preserving the remaining policy bits. */
+  ctrl = xip[XIP_CTRL / 4U];
+  ctrl |= XIP_CTRL_EN;
+  xip[XIP_CTRL / 4U] = ctrl;
 }
 
 /**
@@ -342,6 +336,8 @@ RAMFUNC static void rp_flash_exit_xip(EFlashDriver *eflp) {
 
   /* Default non XIP SPI configuration */
   ssi[SSI_SSIENR / 4U] = 0U;
+  (void)ssi[SSI_SR / 4U];          /* Clear sticky errors (clear-on-read). */
+  (void)ssi[SSI_ICR / 4U];
   ssi[SSI_BAUDR / 4U] = SSI_BAUDR_DEFAULT;
   ssi[SSI_CTRLR0 / 4U] = SSI_CTRLR0_DFS_32_8BIT;
   ssi[SSI_SER / 4U] = 1U;
@@ -421,29 +417,46 @@ RAMFUNC static void rp_flash_exit_xip(EFlashDriver *eflp) {
 }
 
 /**
- * @brief   Enter XIP mode
+ * @brief   Enter XIP mode by re-executing the boot2 stage2 code.
  * @note    This function MUST be in RAM.
- * @note    This configures standard SPI XIP mode using 03h read command.
- *          This works with all flash chips.
+ * @details The SSI SPI_CTRLR0 register XIP_CMD field (bits 31:24) does
+ *          not read back on RP2040 — it always returns zero regardless
+ *          of the value written.  Because the boot2 stores the QSPI
+ *          continuous-read mode byte (typically 0xA0) in this field,
+ *          a register save/restore approach cannot recover the original
+ *          XIP configuration.
+ *
+ *          Instead, the boot2 stage2 code is copied to RAM during
+ *          driver init and re-executed here.  This is the same technique used
+ *          by the Pico SDK (flash_enable_xip_via_boot2 in
+ *          hardware_flash/flash.c).
+ *
+ *          Per RP2040 Datasheet section 2.8.1.3, the 256-byte boot2
+ *          image is position-independent Thumb code — the bootrom
+ *          copies it to SRAM and calls it during the boot sequence.
+ *          All standard boot2 variants (w25q080, generic_03h,
+ *          at25sf128a, is25lp080) follow the Pico SDK convention of
+ *          checking the saved LR on exit: if non-zero (called from
+ *          user code) the boot2 returns to the caller; if zero (called
+ *          from the bootrom) it jumps to the application entry point.
+ *          Custom boot2 implementations that do not follow this
+ *          convention will not work with this driver.
  *
  * @param[in] eflp      pointer to the EFlashDriver object
  */
 RAMFUNC static void rp_flash_enter_xip(EFlashDriver *eflp) {
-  volatile uint32_t *ssi = eflp->ssi;
   volatile uint32_t *ioqspi_ss_ctrl =
       (volatile uint32_t *)(RP_IOQSPI_BASE + IOQSPI_GPIO_QSPI_SS_CTRL);
 
-  /* Reset CS control to normal */
+  (void)eflp;
+
+  /* Reset CS control to normal. */
   *ioqspi_ss_ctrl = 0U;
 
-  /* Default XIP SPI configuration */
-  ssi[SSI_SSIENR / 4U] = 0U;
-  ssi[SSI_BAUDR / 4U] = SSI_BAUDR_DEFAULT;
-  ssi[SSI_CTRLR0 / 4U] = SSI_CTRLR0_XIP;
-  ssi[SSI_CTRLR1 / 4U] = 0U;
-  ssi[SSI_SPI_CTRLR0 / 4U] = SSI_SPI_CTRLR0_XIP;
-  ssi[SSI_SER / 4U] = 1U;
-  ssi[SSI_SSIENR / 4U] = 1U;
+  /* Re-execute the boot2 to fully restore the SSI configuration
+   * including QSPI mode, continuous read, and baud rate.  The OR
+   * with 1 sets the Thumb bit required by BX on ARMv6-M. */
+  ((void (*)(void))((uintptr_t)rp_boot2 | 1U))();
 
   rp_flash_flush_cache();
 }
@@ -493,14 +506,15 @@ RAMFUNC static void rp_flash_program_page(EFlashDriver *eflp, uint32_t offset,
 }
 
 /**
- * @brief   Erase a sector of flash (internal command only).
+ * @brief   Send an erase command to flash.
  * @note    This function MUST be in RAM.
  *
  * @param[in] eflp      pointer to the EFlashDriver object
- * @param[in] offset    flash offset (must be sector-aligned)
+ * @param[in] cmd       JEDEC erase command byte
+ * @param[in] offset    flash offset (must be aligned to erase unit)
  */
-RAMFUNC static void rp_flash_erase_sector_cmd(EFlashDriver *eflp,
-                                              uint32_t offset) {
+RAMFUNC static void rp_flash_erase_cmd(EFlashDriver *eflp, uint8_t cmd,
+                                        uint32_t offset) {
   uint8_t addr[3];
 
   /* Send write enable. */
@@ -511,27 +525,28 @@ RAMFUNC static void rp_flash_erase_sector_cmd(EFlashDriver *eflp,
   addr[1] = (uint8_t)(offset >> 8);
   addr[2] = (uint8_t)offset;
 
-  /* Send sector erase command with address. */
-  rp_flash_do_cmd(eflp, FLASHCMD_SECTOR_ERASE, addr, NULL, 3U);
+  /* Send erase command with address. */
+  rp_flash_do_cmd(eflp, cmd, addr, NULL, 3U);
 }
 
 /**
- * @brief   Complete sector erase operation (runs entirely in RAM).
+ * @brief   Complete erase operation (runs entirely in RAM).
  * @note    This function MUST be in RAM. It handles the entire sequence
  *          from exit XIP to enter XIP so no flash code executes while
  *          XIP is disabled.
  *
  * @param[in] eflp      pointer to the EFlashDriver object
- * @param[in] offset    flash offset (must be sector-aligned)
+ * @param[in] cmd       JEDEC erase command byte
+ * @param[in] offset    flash offset (must be aligned to erase unit)
  */
-RAMFUNC static void rp_flash_erase_sector_full(EFlashDriver *eflp,
-                                               uint32_t offset) {
+RAMFUNC static void rp_flash_erase_full(EFlashDriver *eflp, uint8_t cmd,
+                                        uint32_t offset) {
 
   /* Exit XIP mode. */
   rp_flash_exit_xip(eflp);
 
   /* Send erase command. */
-  rp_flash_erase_sector_cmd(eflp, offset);
+  rp_flash_erase_cmd(eflp, cmd, offset);
 
   /* Wait for erase to complete. */
   rp_flash_wait_ready(eflp);
@@ -577,7 +592,7 @@ RAMFUNC static void rp_flash_program_page_full(EFlashDriver *eflp,
  * @param[in] count     number of bytes to transfer after command
  */
 RAMFUNC static void rp_flash_read_uid_full(EFlashDriver *eflp,
-                                            uint8_t *rx, size_t count) {
+                                           uint8_t *rx, size_t count) {
 
   /* Exit XIP mode. */
   rp_flash_exit_xip(eflp);
@@ -597,337 +612,38 @@ RAMFUNC static void rp_flash_read_uid_full(EFlashDriver *eflp,
 /* Driver exported functions.                                                */
 /*===========================================================================*/
 
-/**
- * @brief   Low level Embedded Flash driver initialization.
- *
- * @notapi
- */
-void efl_lld_init(void) {
+void rp_efl_lld_init(void) {
 
-  /* Driver initialization. */
-  eflObjectInit(&EFLD1);
-  EFLD1.ssi = (volatile uint32_t *)RP_SSI_BASE;
+  /* Copy the boot2 stage2 image (first 252 bytes of flash, excluding
+   * the 4-byte CRC) into a RAM buffer while XIP is still functional.
+   * After flash program/erase operations, rp_flash_enter_xip()
+   * re-executes this copy to restore the SSI/XIP configuration.
+   * See RP2040 Datasheet section 2.8.1.3 for boot2 requirements. */
+  memcpy(rp_boot2, (const void *)RP_FLASH_BASE, sizeof(rp_boot2));
 }
 
-/**
- * @brief   Configures and activates the Embedded Flash peripheral.
- *
- * @param[in] eflp      pointer to a @p EFlashDriver structure
- *
- * @notapi
- */
-void efl_lld_start(EFlashDriver *eflp) {
+void rp_efl_lld_start(EFlashDriver *eflp) {
 
   (void)eflp;
 
-  /* Nothing to do - flash is always accessible via XIP. */
+  /* Nothing to do - boot2 is copied during init. */
 }
 
-/**
- * @brief   Deactivates the Embedded Flash peripheral.
- *
- * @param[in] eflp      pointer to a @p EFlashDriver structure
- *
- * @notapi
- */
-void efl_lld_stop(EFlashDriver *eflp) {
-
-  (void)eflp;
-
-  /* Nothing to do. */
+void rp_efl_lld_program_page_full(EFlashDriver *eflp,
+                                  uint32_t offset,
+                                  const uint8_t *data,
+                                  size_t len) {
+  rp_flash_program_page_full(eflp, offset, data, len);
 }
 
-/**
- * @brief   Gets the flash descriptor structure.
- *
- * @param[in] instance  pointer to a @p EFlashDriver instance
- * @return              A flash device descriptor.
- *
- * @notapi
- */
-const flash_descriptor_t *efl_lld_get_descriptor(void *instance) {
-
-  (void)instance;
-
-  return &efl_lld_descriptor;
+void rp_efl_lld_erase_full(EFlashDriver *eflp, uint8_t cmd, uint32_t offset) {
+  rp_flash_erase_full(eflp, cmd, offset);
 }
 
-/**
- * @brief   Read operation.
- *
- * @param[in] instance  pointer to a @p EFlashDriver instance
- * @param[in] offset    offset within full flash address space
- * @param[in] n         number of bytes to be read
- * @param[out] rp       pointer to the data buffer
- * @return              An error code.
- * @retval FLASH_NO_ERROR           if there is no erase operation in progress.
- * @retval FLASH_BUSY_ERASING       if there is an erase operation in progress.
- * @retval FLASH_ERROR_READ         if the read operation failed.
- * @retval FLASH_ERROR_HW_FAILURE   if access to the memory failed.
- *
- * @notapi
- */
-flash_error_t efl_lld_read(void *instance, flash_offset_t offset,
-                           size_t n, uint8_t *rp) {
-  EFlashDriver *devp = (EFlashDriver *)instance;
-  flash_error_t err = FLASH_NO_ERROR;
-
-  osalDbgCheck((instance != NULL) && (rp != NULL) && (n > 0U));
-  osalDbgCheck((size_t)offset + n <= (size_t)efl_lld_descriptor.size);
-  osalDbgAssert((devp->state == FLASH_READY) || (devp->state == FLASH_ERASE),
-                "invalid state");
-
-  /* No reading while erasing. */
-  if (devp->state == FLASH_ERASE) {
-    return FLASH_BUSY_ERASING;
-  }
-
-  /* FLASH_READ state while the operation is performed. */
-  devp->state = FLASH_READ;
-
-  /* Read from memory-mapped XIP region. */
-  memcpy((void *)rp, (const void *)(efl_lld_descriptor.address + offset), n);
-
-  /* Ready state again. */
-  devp->state = FLASH_READY;
-
-  return err;
-}
-
-/**
- * @brief   Program operation.
- *
- * @param[in] instance  pointer to a @p EFlashDriver instance
- * @param[in] offset    offset within full flash address space
- * @param[in] n         number of bytes to be programmed
- * @param[in] pp        pointer to the data buffer
- * @return              An error code.
- * @retval FLASH_NO_ERROR           if there is no erase operation in progress.
- * @retval FLASH_BUSY_ERASING       if there is an erase operation in progress.
- * @retval FLASH_ERROR_PROGRAM      if the program operation failed.
- * @retval FLASH_ERROR_HW_FAILURE   if access to the memory failed.
- *
- * @notapi
- */
-flash_error_t efl_lld_program(void *instance, flash_offset_t offset,
-                              size_t n, const uint8_t *pp) {
-  EFlashDriver *devp = (EFlashDriver *)instance;
-  syssts_t sts;
-
-  osalDbgCheck((instance != NULL) && (pp != NULL) && (n > 0U));
-  osalDbgCheck((size_t)offset + n <= (size_t)efl_lld_descriptor.size);
-  osalDbgAssert((devp->state == FLASH_READY) || (devp->state == FLASH_ERASE),
-                "invalid state");
-
-  /* No programming while erasing. */
-  if (devp->state == FLASH_ERASE) {
-    return FLASH_BUSY_ERASING;
-  }
-
-  /* FLASH_PGM state while the operation is performed. */
-  devp->state = FLASH_PGM;
-
-  /* Program in page-sized chunks, source data is copied into RAM */
-  while (n > 0U) {
-    uint8_t page_buf[RP_FLASH_PAGE_SIZE];
-    size_t page_offset = offset & RP_FLASH_PAGE_MASK;
-    size_t page_remaining = RP_FLASH_PAGE_SIZE - page_offset;
-    size_t chunk = (n < page_remaining) ? n : page_remaining;
-
-    /* Copy to RAM while flash is still readable. */
-    memcpy(page_buf, pp, chunk);
-
-    sts = osalSysGetStatusAndLockX();
-
-    /* Program the page. */
-    rp_flash_program_page_full(devp, offset, page_buf, chunk);
-
-    osalSysRestoreStatusX(sts);
-
-    offset += chunk;
-    pp += chunk;
-    n -= chunk;
-  }
-
-  /* Ready state again. */
-  devp->state = FLASH_READY;
-
-  return FLASH_NO_ERROR;
-}
-
-/**
- * @brief   Starts a whole-device erase operation.
- * @note    This is not implemented for safety reasons - erasing the entire
- *          flash would destroy the running firmware.
- *
- * @param[in] instance  pointer to a @p EFlashDriver instance
- * @return              An error code.
- *
- * @notapi
- */
-flash_error_t efl_lld_start_erase_all(void *instance) {
-
-  (void)instance;
-
-  return FLASH_ERROR_UNIMPLEMENTED;
-}
-
-/**
- * @brief   Starts a sector erase operation.
- *
- * @param[in] instance  pointer to a @p EFlashDriver instance
- * @param[in] sector    sector to be erased
- * @return              An error code.
- * @retval FLASH_NO_ERROR           if there is no erase operation in progress.
- * @retval FLASH_BUSY_ERASING       if there is an erase operation in progress.
- * @retval FLASH_ERROR_HW_FAILURE   if access to the memory failed.
- *
- * @notapi
- */
-flash_error_t efl_lld_start_erase_sector(void *instance,
-                                         flash_sector_t sector) {
-  EFlashDriver *devp = (EFlashDriver *)instance;
-  flash_offset_t offset;
-  syssts_t sts;
-
-  osalDbgCheck(instance != NULL);
-  osalDbgCheck(sector < efl_lld_descriptor.sectors_count);
-  osalDbgAssert((devp->state == FLASH_READY) || (devp->state == FLASH_ERASE),
-                "invalid state");
-
-  /* No erasing while erasing. */
-  if (devp->state == FLASH_ERASE) {
-    return FLASH_BUSY_ERASING;
-  }
-
-  /* FLASH_ERASE state while the operation is performed. */
-  devp->state = FLASH_ERASE;
-
-  /* Calculate sector offset. */
-  offset = sector * RP_FLASH_SECTOR_SIZE;
-
-  /* Lock system - interrupts could cause crash if they access flash. */
-  sts = osalSysGetStatusAndLockX();
-
-  /* Perform the entire erase sequence in RAM. */
-  rp_flash_erase_sector_full(devp, offset);
-
-  /* Restore system state. */
-  osalSysRestoreStatusX(sts);
-
-  /* Back to ready state. */
-  devp->state = FLASH_READY;
-
-  return FLASH_NO_ERROR;
-}
-
-/**
- * @brief   Queries the driver for erase operation progress.
- *
- * @param[in] instance  pointer to a @p EFlashDriver instance
- * @param[out] msec     recommended time, in milliseconds, that
- *                      should be spent before calling this
- *                      function again, can be @p NULL
- * @return              An error code.
- * @retval FLASH_NO_ERROR           if there is no erase operation in progress.
- * @retval FLASH_BUSY_ERASING       if there is an erase operation in progress.
- * @retval FLASH_ERROR_ERASE        if the erase operation failed.
- * @retval FLASH_ERROR_HW_FAILURE   if access to the memory failed.
- *
- * @notapi
- */
-flash_error_t efl_lld_query_erase(void *instance, uint32_t *msec) {
-  EFlashDriver *devp = (EFlashDriver *)instance;
-
-  /* If there is an erase in progress then the device must be checked. */
-  if (devp->state == FLASH_ERASE) {
-    /*
-     * Note: Our implementation waits for erase completion in
-     * efl_lld_start_erase_sector(), so we should never actually
-     * be in FLASH_ERASE state when this is called. However, we
-     * handle it properly for interface compliance.
-     */
-    if (msec != NULL) {
-      *msec = RP_FLASH_WAIT_TIME_MS;
-    }
-    return FLASH_BUSY_ERASING;
-  }
-
-  return FLASH_NO_ERROR;
-}
-
-/**
- * @brief   Returns the erase state of a sector.
- *
- * @param[in] instance  pointer to a @p EFlashDriver instance
- * @param[in] sector    sector to be verified
- * @return              An error code.
- * @retval FLASH_NO_ERROR           if the sector is erased.
- * @retval FLASH_BUSY_ERASING       if there is an erase operation in progress.
- * @retval FLASH_ERROR_VERIFY       if the verify operation failed.
- * @retval FLASH_ERROR_HW_FAILURE   if access to the memory failed.
- *
- * @notapi
- */
-flash_error_t efl_lld_verify_erase(void *instance, flash_sector_t sector) {
-  EFlashDriver *devp = (EFlashDriver *)instance;
-  const uint32_t *address;
-  flash_error_t err = FLASH_NO_ERROR;
-  unsigned i;
-
-  osalDbgCheck(instance != NULL);
-  osalDbgCheck(sector < efl_lld_descriptor.sectors_count);
-  osalDbgAssert((devp->state == FLASH_READY) || (devp->state == FLASH_ERASE),
-                "invalid state");
-
-  /* No verifying while erasing. */
-  if (devp->state == FLASH_ERASE) {
-    return FLASH_BUSY_ERASING;
-  }
-
-  /* Address of the sector in XIP space. */
-  address = (const uint32_t *)(efl_lld_descriptor.address +
-                               flashGetSectorOffset(getBaseFlash(devp), sector));
-
-  /* FLASH_READ state while the operation is performed. */
-  devp->state = FLASH_READ;
-
-  /* Scanning the sector space. */
-  for (i = 0U; i < RP_FLASH_SECTOR_SIZE / sizeof(uint32_t); i++) {
-    if (address[i] != 0xFFFFFFFFU) {
-      err = FLASH_ERROR_VERIFY;
-      break;
-    }
-  }
-
-  /* Ready state again. */
-  devp->state = FLASH_READY;
-
-  return err;
-}
-
-/**
- * @brief   Reads the flash chip's unique ID.
- * @note    The JEDEC 0x4B command requires 4 dummy bytes before the
- *          8-byte unique ID. The memcpy runs after XIP is restored
- *          so it is safe to call flash-resident libc.
- *
- * @param[in] eflp      pointer to a @p EFlashDriver structure
- * @param[out] uid      pointer to an 8-byte buffer for the unique ID
- *
- * @api
- */
-void efl_lld_read_unique_id(EFlashDriver *eflp, uint8_t *uid) {
-  uint8_t rx[4U + RP_FLASH_UNIQUE_ID_SIZE];
-  syssts_t sts;
-
-  osalDbgCheck((eflp != NULL) && (uid != NULL));
-
-  sts = osalSysGetStatusAndLockX();
-  rp_flash_read_uid_full(eflp, rx, sizeof(rx));
-  osalSysRestoreStatusX(sts);
-
-  memcpy(uid, rx + 4U, RP_FLASH_UNIQUE_ID_SIZE);
+void rp_efl_lld_read_uid_full(EFlashDriver *eflp,
+                              uint8_t *rx,
+                              size_t count) {
+  rp_flash_read_uid_full(eflp, rx, count);
 }
 
 #endif /* HAL_USE_EFL == TRUE */

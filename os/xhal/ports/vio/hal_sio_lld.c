@@ -78,6 +78,15 @@ static inline uint32_t __sio_vuart_selcfg(uint32_t nvuart, uint32_t ncfg,
   return (uint32_t)r0;
 }
 
+CC_FORCE_INLINE
+static inline uint32_t __sio_vuart_ctl(uint32_t nvuart,
+                                       unsigned int operation,
+                                       void *arg) {
+
+  __syscall3r(97, VIO_CALL(SB_VUART_CTL, nvuart), operation, arg);
+  return (uint32_t)r0;
+}
+
 /*===========================================================================*/
 /* Driver interrupt handlers.                                                */
 /*===========================================================================*/
@@ -190,15 +199,18 @@ void sio_lld_stop(hal_sio_driver_c *siop) {
     osalDbgAssert(false, "invalid SIO instance");
   }
 
-  osalDbgAssert(msg = HAL_RET_SUCCESS, "unexpected failure");
+  osalDbgAssert(msg == HAL_RET_SUCCESS, "unexpected failure");
 }
 
 /**
- * @brief   SIO configuration.
+ * @brief   Applies an explicit SIO configuration.
+ * @note    The VIO port does not accept arbitrary sandbox-provided
+ *          configurations. Only host-approved predefined configurations
+ *          selected using @p drvSelectCfgX() are supported.
  *
  * @param[in] siop      pointer to the @p hal_sio_driver_c object
  * @param[in] config    pointer to the @p hal_sio_config_t structure
- * @return              A pointer to the current configuration structure.
+ * @return              Always @p NULL in the VIO port.
  *
  * @notapi
  */
@@ -207,11 +219,14 @@ const hal_sio_config_t *sio_lld_setcfg(hal_sio_driver_c *siop, const hal_sio_con
   (void)siop;
   (void)config;
 
+  /* Explicit configurations are intentionally rejected in this port. */
   return NULL;
 }
 
 /**
- * @brief       Selects one of the pre-defined SIO configurations.
+ * @brief       Selects one of the host-defined SIO configurations.
+ * @note        The selected configuration is mirrored locally in
+ *              @p siop->cfgbuf after host-side validation and selection.
  *
  * @param[in] siop      pointer to the @p hal_sio_driver_c object
  * @param[in] cfgnum    driver configuration number
@@ -470,10 +485,12 @@ void sio_lld_put(hal_sio_driver_c *siop, uint_fast16_t data) {
  */
 msg_t sio_lld_control(hal_sio_driver_c *siop, unsigned int operation, void *arg) {
 
-  __syscall3r(97, VIO_CALL(SB_VUART_CTL, siop->nvuart), operation, arg);
-  osalDbgAssert(r0 != (uint32_t)-1, "unexpected failure");
+  uint32_t ret;
 
-  return (msg_t)r0;
+  ret = __sio_vuart_ctl(siop->nvuart, operation, arg);
+  osalDbgAssert(ret != (uint32_t)-1, "unexpected failure");
+
+  return (msg_t)ret;
 }
 
 /**

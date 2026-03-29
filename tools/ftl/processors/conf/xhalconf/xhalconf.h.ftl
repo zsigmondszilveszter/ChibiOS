@@ -6,8 +6,7 @@
 
     ChibiOS is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 3 of the License, or
-    (at your option) any later version.
+    the Free Software Foundation version 3 of the License.
 
     ChibiOS is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -49,6 +48,7 @@
 /*===========================================================================*/
 
 #define HAL_USE_PAL                         ${doc.HAL_USE_PAL!"TRUE"}
+#define HAL_USE_ETH                         ${doc.HAL_USE_ETH!"FALSE"}
 #define HAL_USE_MMC_SPI                     ${doc.HAL_USE_MMC_SPI!"FALSE"}
 #define HAL_USE_SIO                         ${doc.HAL_USE_SIO!"FALSE"}
 #define HAL_USE_SPI                         ${doc.HAL_USE_SPI!"FALSE"}
@@ -59,6 +59,14 @@
 
 #define PAL_USE_CALLBACKS                   ${doc.PAL_USE_CALLBACKS!"TRUE"}
 #define PAL_USE_WAIT                        ${doc.PAL_USE_WAIT!"TRUE"}
+
+/*===========================================================================*/
+/* ETH driver settings.                                                      */
+/*===========================================================================*/
+
+#define ETH_USE_SYNCHRONIZATION             ${doc.ETH_USE_SYNCHRONIZATION!"TRUE"}
+#define ETH_USE_EVENTS                      ${doc.ETH_USE_EVENTS!"FALSE"}
+#define ETH_USE_CONFIGURATIONS              ${doc.ETH_USE_CONFIGURATIONS!"FALSE"}
 
 /*===========================================================================*/
 /* SIO driver settings.                                                      */

@@ -9,18 +9,13 @@ STARTUPINC = $(CHIBIOS)/os/common/portability/GCC \
              $(CHIBIOS)/os/common/startup/ARMCMx/compilers/GCC \
              $(CHIBIOS)/os/common/startup/ARMCMx/devices/RP2350 \
              $(CHIBIOS)/os/common/ext/ARM/CMSIS/Core/Include \
+             $(CHIBIOS)/os/common/ext/RP \
              $(CHIBIOS)/os/common/ext/RP/RP2350
 
 STARTUPLD  = $(CHIBIOS)/os/common/startup/ARMCMx/compilers/GCC/ld
 
 USE_EXCEPTIONS_STACKSIZE ?= 0x800
 USE_PROCESS_STACKSIZE    ?= 0x800
-
-# RP2350-specific defines:
-# - CH_DBG_ENABLE_STACK_CHECK: Always save/restore PSPLIM during context switch
-# - CRT0_CPACR_INIT: Always enable FPU and RCP
-DDEFS  += -DCH_DBG_ENABLE_STACK_CHECK=TRUE
-DADEFS += -DCH_DBG_ENABLE_STACK_CHECK=TRUE -DCRT0_CPACR_INIT=0x00F0C000
 
 # Shared variables
 ALLXASMSRC += $(STARTUPASM)
