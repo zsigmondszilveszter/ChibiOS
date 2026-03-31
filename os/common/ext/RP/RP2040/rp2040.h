@@ -1323,6 +1323,12 @@ typedef struct {
 } XOSC_TypeDef;
 
 typedef struct {
+  __IO uint32_t         VREG;
+  __IO uint32_t         BOD;
+  __IO uint32_t         CHIP_RESET;
+} VREG_AND_CHIP_RESET_TypeDef;
+
+typedef struct {
   __IO uint32_t         CS;
   __IO uint32_t         PWR;
   __IO uint32_t         FBDIV_INT;
@@ -1464,6 +1470,7 @@ typedef struct {
 #define __PWM_BASE                        (__APBPERIPH_BASE + 0x00050000U)
 #define __WATCHDOG_BASE                   (__APBPERIPH_BASE + 0x00058000U)
 #define __RTC_BASE                        (__APBPERIPH_BASE + 0x0005C000U)
+#define __VREG_AND_CHIP_RESET_BASE        (__APBPERIPH_BASE + 0x00064000U)
 #define __XOSC_BASE                       (__APBPERIPH_BASE + 0x00024000U)
 #define __CLOCKS_BASE                     (__APBPERIPH_BASE + 0x00008000U)
 #define __PLL_SYS_BASE                    (__APBPERIPH_BASE + 0x00028000U)
@@ -1503,6 +1510,7 @@ typedef struct {
 #define PIO1                              ((PIO_TypeDef *)    __PIO1_BASE)
 #define USB                               ((USB_TypeDef *)    __USB_BASE)
 #define WATCHDOG                          ((WATCHDOG_TypeDef *) __WATCHDOG_BASE)
+#define VREG_AND_CHIP_RESET               ((VREG_AND_CHIP_RESET_TypeDef *) __VREG_AND_CHIP_RESET_BASE)
 #define XOSC                              ((XOSC_TypeDef *)   __XOSC_BASE)
 #define CLOCKS                            ((CLOCKS_TypeDef *) __CLOCKS_BASE)
 #define PLL_SYS                           ((PLL_TypeDef *)    __PLL_SYS_BASE)
@@ -3003,6 +3011,20 @@ typedef struct {
 #define PLL_FBDIV_INT_Pos                 0U
 #define PLL_FBDIV_INT_Msk                 (0xFFFU << PLL_FBDIV_INT_Pos)
 #define PLL_FBDIV_INT(n)                  ((n) << PLL_FBDIV_INT_Pos)
+
+/* VREG_AND_CHIP_RESET VREG */
+#define VREG_AND_CHIP_RESET_VREG_ROK_Pos  12U
+#define VREG_AND_CHIP_RESET_VREG_ROK_Msk  (1U << VREG_AND_CHIP_RESET_VREG_ROK_Pos)
+#define VREG_AND_CHIP_RESET_VREG_ROK      VREG_AND_CHIP_RESET_VREG_ROK_Msk
+#define VREG_AND_CHIP_RESET_VREG_VSEL_Pos 4U
+#define VREG_AND_CHIP_RESET_VREG_VSEL_Msk (0xFU << VREG_AND_CHIP_RESET_VREG_VSEL_Pos)
+#define VREG_AND_CHIP_RESET_VREG_VSEL(n)  ((n) << VREG_AND_CHIP_RESET_VREG_VSEL_Pos)
+#define VREG_AND_CHIP_RESET_VREG_HIZ_Pos  1U
+#define VREG_AND_CHIP_RESET_VREG_HIZ_Msk  (1U << VREG_AND_CHIP_RESET_VREG_HIZ_Pos)
+#define VREG_AND_CHIP_RESET_VREG_HIZ      VREG_AND_CHIP_RESET_VREG_HIZ_Msk
+#define VREG_AND_CHIP_RESET_VREG_EN_Pos   0U
+#define VREG_AND_CHIP_RESET_VREG_EN_Msk   (1U << VREG_AND_CHIP_RESET_VREG_EN_Pos)
+#define VREG_AND_CHIP_RESET_VREG_EN       VREG_AND_CHIP_RESET_VREG_EN_Msk
 
 #define PLL_PRIM_POSTDIV1_Pos             16U
 #define PLL_PRIM_POSTDIV1_Msk             (0x7U << PLL_PRIM_POSTDIV1_Pos)
