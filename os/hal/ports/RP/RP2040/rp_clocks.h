@@ -102,6 +102,25 @@
 /** @} */
 
 /**
+ * @name    VREG setup for fast system clocks
+ * @{
+ */
+#if !defined(RP_SYS_VREG_VOLTAGE) || defined(__DOXYGEN__)
+#if RP_PLL_SYS_CLK >= 250000000U
+#define RP_SYS_VREG_VOLTAGE                 13U             /* 1.20V */
+#elif RP_PLL_SYS_CLK >= 200000000U
+#define RP_SYS_VREG_VOLTAGE                 12U             /* 1.15V */
+#else
+#define RP_SYS_VREG_VOLTAGE                 0U              /* Disabled */
+#endif
+#endif
+
+#if !defined(RP_SYS_VREG_SETTLE_DELAY_US) || defined(__DOXYGEN__)
+#define RP_SYS_VREG_SETTLE_DELAY_US         1000U
+#endif
+/** @} */
+
+/**
  * @name    Compile-time clock frequencies
  * @note    These are compile-time constants derived from PLL configuration.
  *          For runtime clock queries, use the hal_lld_get_clock_point() API.

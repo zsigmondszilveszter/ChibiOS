@@ -31,10 +31,11 @@
 
 /**
  * @brief   XOSC startup delay multiplier.
- * @note    Default value of 1 for 12MHz crystal.
+ * @note    Match the pico-sdk default and leave extra margin for slow crystal
+ *          startup during boot.
  */
 #if !defined(RP_XOSC_STARTUP_DELAY_MULTIPLIER)
-#define RP_XOSC_STARTUP_DELAY_MULTIPLIER    1U
+#define RP_XOSC_STARTUP_DELAY_MULTIPLIER    6U
 #endif
 
 /*===========================================================================*/

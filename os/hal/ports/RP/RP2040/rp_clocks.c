@@ -55,6 +55,31 @@ static uint32_t configured_freq[RP_CLK_COUNT];
 /* Driver local functions.                                                   */
 /*===========================================================================*/
 
+static void delay_us(uint32_t delay) {
+  uint32_t start = TIMER0->TIMERAWL;
+
+  while ((uint32_t)(TIMER0->TIMERAWL - start) < delay) {
+    /* Wait using TIMER0, driven from WATCHDOG->TICK. */
+  }
+}
+
+static void set_vreg_if_needed(void) {
+
+#if RP_SYS_VREG_VOLTAGE > 0U
+  uint32_t reg;
+
+  reg = VREG_AND_CHIP_RESET->VREG;
+  if (((reg & VREG_AND_CHIP_RESET_VREG_VSEL_Msk) >>
+       VREG_AND_CHIP_RESET_VREG_VSEL_Pos) <
+      RP_SYS_VREG_VOLTAGE) {
+    reg &= ~VREG_AND_CHIP_RESET_VREG_VSEL_Msk;
+    reg |= VREG_AND_CHIP_RESET_VREG_VSEL(RP_SYS_VREG_VOLTAGE);
+    VREG_AND_CHIP_RESET->VREG = reg;
+    delay_us(RP_SYS_VREG_SETTLE_DELAY_US);
+  }
+#endif
+}
+
 /*===========================================================================*/
 /* Driver exported functions.                                                */
 /*===========================================================================*/
@@ -112,6 +137,12 @@ void rp_clock_init(void) {
     }
     configured_freq[RP_CLK_REF] = RP_XOSCCLK;
   }
+
+  /* Now clk_ref is stable and known, use it for accurate timed delays. */
+  WATCHDOG->TICK = WATCHDOG_TICK_ENABLE | (RP_XOSCCLK / 1000000U);
+
+  /* Raise VREG before the fast clk_sys switch when requested. */
+  set_vreg_if_needed();
 
   /* CLK_SYS = PLL_SYS = 125 MHz */
   CLOCKS->CLR.CLK[RP_CLK_SYS].CTRL = CLOCKS_CLK_SYS_CTRL_SRC_Msk;
