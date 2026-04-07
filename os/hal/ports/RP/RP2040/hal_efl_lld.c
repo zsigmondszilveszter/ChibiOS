@@ -41,39 +41,6 @@
 #define RAMFUNC __attribute__((noinline, section(".ramtext")))
 
 /**
- * @name    SSI register offsets
- * @{
- */
-#define SSI_CTRLR0                          0x00U
-#define SSI_CTRLR1                          0x04U
-#define SSI_SSIENR                          0x08U
-#define SSI_SER                             0x10U
-#define SSI_BAUDR                           0x14U
-#define SSI_TXFLR                           0x20U
-#define SSI_RXFLR                           0x24U
-#define SSI_SR                              0x28U
-#define SSI_ICR                             0x48U
-#define SSI_DR0                             0x60U
-#define SSI_SPI_CTRLR0                      0xF4U
-/** @} */
-
-/**
- * @name    SSI status register bits
- * @{
- */
-#define SSI_SR_TFE                          (1U << 2)   /* TX FIFO empty */
-#define SSI_SR_BUSY                         (1U << 0)   /* SSI busy */
-/** @} */
-
-/**
- * @name    SSI CTRLR0 bits
- * @{
- */
-#define SSI_CTRLR0_DFS_32_POS               16U
-#define SSI_CTRLR0_DFS_32_8BIT              (7U << SSI_CTRLR0_DFS_32_POS)
-/** @} */
-
-/**
  * @name    SSI configuration for direct SPI mode
  * @{
  */
@@ -81,51 +48,10 @@
 /** @} */
 
 /**
- * @name    IO QSPI base and register offsets
+ * @name    IO QSPI register indexes
  * @{
  */
-#define RP_IOQSPI_BASE                      0x40018000U
-#define IOQSPI_GPIO_QSPI_SS_CTRL            0x0CU
-/** @} */
-
-/**
- * @name    IO QSPI output override values
- * @{
- */
-#define IOQSPI_OUTOVER_NORMAL               0U
-#define IOQSPI_OUTOVER_LOW                  2U
-#define IOQSPI_OUTOVER_HIGH                 3U
-/** @} */
-
-/**
- * @name    XIP control register offsets
- * @{
- */
-#define XIP_CTRL                            0x00U
-#define XIP_CTRL_EN                         1U
-#define XIP_FLUSH                           0x04U
-#define XIP_STAT                            0x08U
-/** @} */
-
-/**
- * @name    PADS QSPI base and register offsets
- * @{
- */
-#define RP_PADS_QSPI_BASE                   0x40020000U
-#define PADS_QSPI_GPIO_QSPI_SD0             0x08U
-#define PADS_QSPI_GPIO_QSPI_SD1             0x0CU
-#define PADS_QSPI_GPIO_QSPI_SD2             0x10U
-#define PADS_QSPI_GPIO_QSPI_SD3             0x14U
-/** @} */
-
-/**
- * @name    PADS QSPI control bits
- * @{
- */
-#define PADS_QSPI_OD_BITS                   (1U << 7)   /* Output disable */
-#define PADS_QSPI_IE_BITS                   (1U << 6)   /* Input enable */
-#define PADS_QSPI_PUE_BITS                  (1U << 3)   /* Pull up enable */
-#define PADS_QSPI_PDE_BITS                  (1U << 2)   /* Pull down enable */
+#define RP2040_IO_QSPI_SS_INDEX             1U
 /** @} */
 
 /**
@@ -165,7 +91,7 @@
  * @note    EFLD1.ssi is statically initialized to allow use before hal init
  */
 EFlashDriver EFLD1 = {
-  .ssi = (volatile uint32_t *)RP_SSI_BASE
+  .ssi = XIP_SSI
 };
 
 /*===========================================================================*/
@@ -192,15 +118,15 @@ CC_ALIGN_DATA(4) static uint8_t rp_boot2[252];
  */
 RAMFUNC static void rp_flash_cs_force(EFlashDriver *eflp, bool high) {
   (void)eflp;
+  uint32_t val = high ? IOQSPI_CTRL_OUTOVER_HIGH : IOQSPI_CTRL_OUTOVER_LOW;
 
-  volatile uint32_t *ioqspi_ss_ctrl =
-      (volatile uint32_t *)(RP_IOQSPI_BASE + IOQSPI_GPIO_QSPI_SS_CTRL);
-  uint32_t val = high ? IOQSPI_OUTOVER_HIGH : IOQSPI_OUTOVER_LOW;
-
-  *ioqspi_ss_ctrl = (*ioqspi_ss_ctrl & ~(3U << 8)) | (val << 8);
+  IO_QSPI->GPIO[RP2040_IO_QSPI_SS_INDEX].CTRL =
+      (IO_QSPI->GPIO[RP2040_IO_QSPI_SS_INDEX].CTRL &
+       ~IOQSPI_CTRL_OUTOVER_Msk) |
+      IOQSPI_CTRL_OUTOVER(val);
 
   /* Read back to ensure write is flushed */
-  (void)*ioqspi_ss_ctrl;
+  (void)IO_QSPI->GPIO[RP2040_IO_QSPI_SS_INDEX].CTRL;
 }
 
 /**
@@ -214,7 +140,7 @@ RAMFUNC static void rp_flash_cs_force(EFlashDriver *eflp, bool high) {
  */
 RAMFUNC static void rp_flash_put_get(EFlashDriver *eflp, const uint8_t *tx,
                                      uint8_t *rx, size_t count) {
-  volatile uint32_t *ssi = eflp->ssi;
+  SSI_TypeDef *ssi = eflp->ssi;
   size_t tx_remaining = count;
   size_t rx_remaining = count;
   const size_t max_in_flight = 14U; /* FIFO is 16 deep so we leave a margin */
@@ -224,13 +150,13 @@ RAMFUNC static void rp_flash_put_get(EFlashDriver *eflp, const uint8_t *tx,
 
     while ((tx_remaining > 0U) && (in_flight < max_in_flight)) {
       uint8_t data = (tx != NULL) ? *tx++ : 0U;
-      ssi[SSI_DR0 / 4U] = data;
+      ssi->DR[0] = data;
       tx_remaining--;
       in_flight++;
     }
 
-    while ((rx_remaining > 0U) && (ssi[SSI_RXFLR / 4U] > 0U)) {
-      uint8_t data = (uint8_t)ssi[SSI_DR0 / 4U];
+    while ((rx_remaining > 0U) && (ssi->RXFLR > 0U)) {
+      uint8_t data = (uint8_t)ssi->DR[0];
       if (rx != NULL) {
         *rx++ = data;
       }
@@ -256,10 +182,10 @@ RAMFUNC static void rp_flash_do_cmd(EFlashDriver *eflp, uint8_t cmd,
   rp_flash_cs_force(eflp, false);
 
   /* Send command byte. */
-  eflp->ssi[SSI_DR0 / 4U] = cmd;
-  while (eflp->ssi[SSI_RXFLR / 4U] == 0U) {
+  eflp->ssi->DR[0] = cmd;
+  while (eflp->ssi->RXFLR == 0U) {
   }
-  (void)eflp->ssi[SSI_DR0 / 4U];
+  (void)eflp->ssi->DR[0];
 
   /* Transfer remaining data. */
   if (count > 0U) {
@@ -300,19 +226,38 @@ RAMFUNC static void rp_flash_write_enable(EFlashDriver *eflp) {
  * @note    This function MUST be in RAM.
  */
 RAMFUNC static void rp_flash_flush_cache(void) {
-  volatile uint32_t *xip = (volatile uint32_t *)RP_XIP_CTRL_BASE;
   uint32_t ctrl;
 
   /* Write to flush register to trigger cache flush. */
-  xip[XIP_FLUSH / 4U] = 1U;
+  XIP_CTRL->FLUSH = 1U;
 
   /* Read back blocks until flush is complete. */
-  (void)xip[XIP_FLUSH / 4U];
+  (void)XIP_CTRL->FLUSH;
 
   /* Re-enable the cache while preserving the remaining policy bits. */
-  ctrl = xip[XIP_CTRL / 4U];
-  ctrl |= XIP_CTRL_EN;
-  xip[XIP_CTRL / 4U] = ctrl;
+  ctrl = XIP_CTRL->CTRL;
+  ctrl |= XIP_CTRL_CTRL_EN;
+  XIP_CTRL->CTRL = ctrl;
+}
+
+/**
+ * @brief   Reset QSPI pads and mux to connect SSI to internal flash.
+ * @note    This function MUST be in RAM.
+ */
+RAMFUNC static void rp_flash_connect_internal(void) {
+  uint32_t bits = RESETS_ALLREG_IO_QSPI | RESETS_ALLREG_PADS_QSPI;
+  unsigned i;
+
+  /* Hard-reset IO_QSPI and PADS_QSPI. */
+  RESETS->SET.RESET = bits;
+  RESETS->CLR.RESET = bits;
+  while ((RESETS->RESET_DONE & bits) != bits) {
+  }
+
+  /* Mux all QSPI GPIOs to function 0 (XIP). */
+  for (i = 0U; i < 6U; i++) {
+    IO_QSPI->GPIO[i].CTRL = 0U;
+  }
 }
 
 /**
@@ -323,46 +268,48 @@ RAMFUNC static void rp_flash_flush_cache(void) {
  * @param[in] eflp      pointer to the EFlashDriver object
  */
 RAMFUNC static void rp_flash_exit_xip(EFlashDriver *eflp) {
-  volatile uint32_t *ssi = eflp->ssi;
-  volatile uint32_t *pads_qspi = (volatile uint32_t *)RP_PADS_QSPI_BASE;
+  SSI_TypeDef *ssi = eflp->ssi;
+  PADS_QSPI_TypeDef *pads_qspi = PADS_QSPI;
   uint32_t padctrl_save;
   uint32_t padctrl_tmp;
   unsigned i;
   volatile unsigned delay;
 
   /* Wait for any pending work.*/
-  while ((ssi[SSI_SR / 4U] & SSI_SR_BUSY) != 0U) {
+  while ((ssi->SR & SSI_SR_BUSY) != 0U) {
   }
 
   /* Default non XIP SPI configuration */
-  ssi[SSI_SSIENR / 4U] = 0U;
-  (void)ssi[SSI_SR / 4U];          /* Clear sticky errors (clear-on-read). */
-  (void)ssi[SSI_ICR / 4U];
-  ssi[SSI_BAUDR / 4U] = SSI_BAUDR_DEFAULT;
-  ssi[SSI_CTRLR0 / 4U] = SSI_CTRLR0_DFS_32_8BIT;
-  ssi[SSI_SER / 4U] = 1U;
-  ssi[SSI_SSIENR / 4U] = 1U;
+  ssi->SSIENR = 0U;
+  (void)ssi->SR;                    /* Clear sticky errors (clear-on-read). */
+  (void)ssi->ICR;
+  ssi->BAUDR = SSI_BAUDR_DEFAULT;
+  ssi->CTRLR0 = SSI_CTRLR0_SPI_FRF_STD |
+                 SSI_CTRLR0_TMOD_TX_AND_RX |
+                 SSI_CTRLR0_DFS_32(7U);
+  ssi->SER = 1U;
+  ssi->SSIENR = 1U;
 
   /*
    * Exit continuous read mode sequence:
    * 1. CS high 32 clocks with IO pulled down
    * 2. CS low 32 clocks with IO pulled up
    * 3. Send 0xFF, 0xFF
-   */
+  */
 
   /* Save pad control and configure with output disabled.*/
-  padctrl_save = pads_qspi[PADS_QSPI_GPIO_QSPI_SD0 / 4U];
-  padctrl_tmp = (padctrl_save & ~(PADS_QSPI_OD_BITS | PADS_QSPI_PUE_BITS |
-                                  PADS_QSPI_PDE_BITS))
-                | PADS_QSPI_OD_BITS | PADS_QSPI_PDE_BITS;
+  padctrl_save = pads_qspi->GPIO_QSPI_SD0;
+  padctrl_tmp = (padctrl_save & ~(PADS_QSPI_OD | PADS_QSPI_PUE |
+                                  PADS_QSPI_PDE))
+                | PADS_QSPI_OD | PADS_QSPI_PDE;
 
   /* 1. CS high */
   rp_flash_cs_force(eflp, true);
 
-  pads_qspi[PADS_QSPI_GPIO_QSPI_SD0 / 4U] = padctrl_tmp;
-  pads_qspi[PADS_QSPI_GPIO_QSPI_SD1 / 4U] = padctrl_tmp;
-  pads_qspi[PADS_QSPI_GPIO_QSPI_SD2 / 4U] = padctrl_tmp;
-  pads_qspi[PADS_QSPI_GPIO_QSPI_SD3 / 4U] = padctrl_tmp;
+  pads_qspi->GPIO_QSPI_SD0 = padctrl_tmp;
+  pads_qspi->GPIO_QSPI_SD1 = padctrl_tmp;
+  pads_qspi->GPIO_QSPI_SD2 = padctrl_tmp;
+  pads_qspi->GPIO_QSPI_SD3 = padctrl_tmp;
 
   /* Delay of ~6000 cycles */
   for (delay = 0U; delay < 2048U; delay++) {
@@ -370,21 +317,21 @@ RAMFUNC static void rp_flash_exit_xip(EFlashDriver *eflp) {
 
   /* Send 4 bytes / 32 clocks */
   for (i = 0U; i < 4U; i++) {
-    ssi[SSI_DR0 / 4U] = 0U;
-    while (ssi[SSI_RXFLR / 4U] == 0U) {
+    ssi->DR[0] = 0U;
+    while (ssi->RXFLR == 0U) {
     }
-    (void)ssi[SSI_DR0 / 4U];
+    (void)ssi->DR[0];
   }
 
-  padctrl_tmp = (padctrl_tmp & ~PADS_QSPI_PDE_BITS) | PADS_QSPI_PUE_BITS;
+  padctrl_tmp = (padctrl_tmp & ~PADS_QSPI_PDE) | PADS_QSPI_PUE;
 
   /* 2. CS low */
   rp_flash_cs_force(eflp, false);
 
-  pads_qspi[PADS_QSPI_GPIO_QSPI_SD0 / 4U] = padctrl_tmp;
-  pads_qspi[PADS_QSPI_GPIO_QSPI_SD1 / 4U] = padctrl_tmp;
-  pads_qspi[PADS_QSPI_GPIO_QSPI_SD2 / 4U] = padctrl_tmp;
-  pads_qspi[PADS_QSPI_GPIO_QSPI_SD3 / 4U] = padctrl_tmp;
+  pads_qspi->GPIO_QSPI_SD0 = padctrl_tmp;
+  pads_qspi->GPIO_QSPI_SD1 = padctrl_tmp;
+  pads_qspi->GPIO_QSPI_SD2 = padctrl_tmp;
+  pads_qspi->GPIO_QSPI_SD3 = padctrl_tmp;
 
   /* Delay of ~6000 cycles */
   for (delay = 0U; delay < 2048U; delay++) {
@@ -392,27 +339,27 @@ RAMFUNC static void rp_flash_exit_xip(EFlashDriver *eflp) {
 
   /* Send 4 bytes / 32 clocks */
   for (i = 0U; i < 4U; i++) {
-    ssi[SSI_DR0 / 4U] = 0U;
-    while (ssi[SSI_RXFLR / 4U] == 0U) {
+    ssi->DR[0] = 0U;
+    while (ssi->RXFLR == 0U) {
     }
-    (void)ssi[SSI_DR0 / 4U];
+    (void)ssi->DR[0];
   }
 
   /* Restore pad controls. */
-  pads_qspi[PADS_QSPI_GPIO_QSPI_SD0 / 4U] = padctrl_save;
-  pads_qspi[PADS_QSPI_GPIO_QSPI_SD1 / 4U] = padctrl_save;
-  padctrl_save = (padctrl_save & ~PADS_QSPI_PDE_BITS) | PADS_QSPI_PUE_BITS;
-  pads_qspi[PADS_QSPI_GPIO_QSPI_SD2 / 4U] = padctrl_save;
-  pads_qspi[PADS_QSPI_GPIO_QSPI_SD3 / 4U] = padctrl_save;
+  pads_qspi->GPIO_QSPI_SD0 = padctrl_save;
+  pads_qspi->GPIO_QSPI_SD1 = padctrl_save;
+  padctrl_save = (padctrl_save & ~PADS_QSPI_PDE) | PADS_QSPI_PUE;
+  pads_qspi->GPIO_QSPI_SD2 = padctrl_save;
+  pads_qspi->GPIO_QSPI_SD3 = padctrl_save;
 
   /* 3. Send 0xFF, 0xFF */
   rp_flash_cs_force(eflp, false);
-  ssi[SSI_DR0 / 4U] = 0xFFU;
-  ssi[SSI_DR0 / 4U] = 0xFFU;
-  while (ssi[SSI_RXFLR / 4U] < 2U) {
+  ssi->DR[0] = 0xFFU;
+  ssi->DR[0] = 0xFFU;
+  while (ssi->RXFLR < 2U) {
   }
-  (void)ssi[SSI_DR0 / 4U];
-  (void)ssi[SSI_DR0 / 4U];
+  (void)ssi->DR[0];
+  (void)ssi->DR[0];
   rp_flash_cs_force(eflp, true);
 }
 
@@ -445,13 +392,13 @@ RAMFUNC static void rp_flash_exit_xip(EFlashDriver *eflp) {
  * @param[in] eflp      pointer to the EFlashDriver object
  */
 RAMFUNC static void rp_flash_enter_xip(EFlashDriver *eflp) {
-  volatile uint32_t *ioqspi_ss_ctrl =
-      (volatile uint32_t *)(RP_IOQSPI_BASE + IOQSPI_GPIO_QSPI_SS_CTRL);
-
   (void)eflp;
 
   /* Reset CS control to normal. */
-  *ioqspi_ss_ctrl = 0U;
+  IO_QSPI->GPIO[RP2040_IO_QSPI_SS_INDEX].CTRL =
+      (IO_QSPI->GPIO[RP2040_IO_QSPI_SS_INDEX].CTRL &
+       ~IOQSPI_CTRL_OUTOVER_Msk) |
+      IOQSPI_CTRL_OUTOVER(IOQSPI_CTRL_OUTOVER_NORMAL);
 
   /* Re-execute the boot2 to fully restore the SSI configuration
    * including QSPI mode, continuous read, and baud rate.  The OR
@@ -472,7 +419,7 @@ RAMFUNC static void rp_flash_enter_xip(EFlashDriver *eflp) {
  */
 RAMFUNC static void rp_flash_program_page(EFlashDriver *eflp, uint32_t offset,
                                           const uint8_t *data, size_t len) {
-  volatile uint32_t *ssi = eflp->ssi;
+  SSI_TypeDef *ssi = eflp->ssi;
   uint8_t addr[3];
 
   /* Send write enable. */
@@ -487,10 +434,10 @@ RAMFUNC static void rp_flash_program_page(EFlashDriver *eflp, uint32_t offset,
   rp_flash_cs_force(eflp, false);
 
   /* Send page program command. */
-  ssi[SSI_DR0 / 4U] = FLASHCMD_PAGE_PROGRAM;
-  while (ssi[SSI_RXFLR / 4U] == 0U) {
+  ssi->DR[0] = FLASHCMD_PAGE_PROGRAM;
+  while (ssi->RXFLR == 0U) {
   }
-  (void)ssi[SSI_DR0 / 4U];
+  (void)ssi->DR[0];
 
   /* Send address. */
   rp_flash_put_get(eflp, addr, NULL, 3U);
@@ -542,7 +489,8 @@ RAMFUNC static void rp_flash_erase_cmd(EFlashDriver *eflp, uint8_t cmd,
 RAMFUNC static void rp_flash_erase_full(EFlashDriver *eflp, uint8_t cmd,
                                         uint32_t offset) {
 
-  /* Exit XIP mode. */
+  /* Connect SSI to flash and exit XIP mode. */
+  rp_flash_connect_internal();
   rp_flash_exit_xip(eflp);
 
   /* Send erase command. */
@@ -571,7 +519,8 @@ RAMFUNC static void rp_flash_program_page_full(EFlashDriver *eflp,
                                                const uint8_t *data,
                                                size_t len) {
 
-  /* Exit XIP mode. */
+  /* Connect SSI to flash and exit XIP mode. */
+  rp_flash_connect_internal();
   rp_flash_exit_xip(eflp);
 
   /* Program the page. */
@@ -594,7 +543,8 @@ RAMFUNC static void rp_flash_program_page_full(EFlashDriver *eflp,
 RAMFUNC static void rp_flash_read_uid_full(EFlashDriver *eflp,
                                            uint8_t *rx, size_t count) {
 
-  /* Exit XIP mode. */
+  /* Connect SSI to flash and exit XIP mode. */
+  rp_flash_connect_internal();
   rp_flash_exit_xip(eflp);
 
   /* Send read unique ID command. */
