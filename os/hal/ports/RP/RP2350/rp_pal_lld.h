@@ -43,4 +43,15 @@
                                              PAL_RP_PAD_SCHMITT)
 /** @} */
 
+/**
+ * @brief   Access a SIO GPIO register by port.
+ * @details Given a register name (field of SIO) and port (0, 1), produce a
+ *          reference to the correct GPIO register for the port. On the RP2350
+ *          every "hi" register immediately follows the "low" register.
+ *
+ * @notapi
+ */
+#define RP_PAL_SIO_REG(reg, port)                                               \
+  ((&SIO->reg)[(port)])
+
 #endif /* RP2350_RP_PAL_LLD_H */

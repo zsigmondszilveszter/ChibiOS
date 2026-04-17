@@ -61,6 +61,31 @@
 #define STM32_RTC_CR_INIT                   0U
 #endif
 
+#if defined(STM32_RTC_TAMP_STAMP_NUMBER) && \
+    (!defined(STM32_IRQ_RTC_TAMP_STAMP_PRIORITY) || defined(__DOXYGEN__))
+#define STM32_IRQ_RTC_TAMP_STAMP_PRIORITY   6
+#endif
+
+#if defined(STM32_RTC_WKUP_NUMBER) && \
+    (!defined(STM32_IRQ_RTC_WKUP_PRIORITY) || defined(__DOXYGEN__))
+#define STM32_IRQ_RTC_WKUP_PRIORITY         6
+#endif
+
+#if defined(STM32_RTC_ALARM_NUMBER) && \
+    (!defined(STM32_IRQ_RTC_ALARM_PRIORITY) || defined(__DOXYGEN__))
+#define STM32_IRQ_RTC_ALARM_PRIORITY        6
+#endif
+
+#if defined(STM32_RTC_GLOBAL_NUMBER) && \
+    (!defined(STM32_IRQ_RTC_GLOBAL_PRIORITY) || defined(__DOXYGEN__))
+#define STM32_IRQ_RTC_GLOBAL_PRIORITY       6
+#endif
+
+#if defined(STM32_RTC_TAMP_NUMBER) && \
+    (!defined(STM32_IRQ_RTC_TAMP_PRIORITY) || defined(__DOXYGEN__))
+#define STM32_IRQ_RTC_TAMP_PRIORITY         6
+#endif
+
 #if HAL_USE_RTC && !STM32_HAS_RTC
 #error "RTC not present in the selected device"
 #endif
@@ -85,8 +110,7 @@
                                                      STM32_RTC_PRESS_VALUE)
 
 #define rtc_lld_driver_fields                                               \
-  RTC_TypeDef               *rtc;                                           \
-  hal_rtc_config_t          config_buf
+  RTC_TypeDef               *rtc
 
 #define rtc_lld_config_fields
 
@@ -101,6 +125,7 @@ extern "C" {
   const hal_rtc_config_t *rtc_lld_selcfg(hal_rtc_driver_c *rtcp,
                                          unsigned cfgnum);
   void rtc_lld_set_callback(hal_rtc_driver_c *rtcp, drv_cb_t cb);
+  void rtc_lld_serve_interrupt(void);
   msg_t rtc_lld_set_datetime(hal_rtc_driver_c *rtcp,
                              const rtc_datetime_t *timespec);
   msg_t rtc_lld_get_datetime(hal_rtc_driver_c *rtcp,

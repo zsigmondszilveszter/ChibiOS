@@ -327,13 +327,13 @@ static inline bool halClockSwitchMode(const halclkcfg_t *ccp) {
 
 /* Normal drivers.*/
 #include "hal_pal.h"
-//#include "hal_adc.h"
+#include "hal_adc.h"
 //#include "hal_can.h"
 //#include "hal_crypto.h"
 //#include "hal_dac.h"
 //#include "hal_efl.h"
 #include "hal_eth.h"
-//#include "hal_gpt.h"
+#include "hal_gpt.h"
 //#include "hal_i2c.h"
 //#include "hal_i2s.h"
 //#include "hal_icu.h"
@@ -347,7 +347,7 @@ static inline bool halClockSwitchMode(const halclkcfg_t *ccp) {
 //#include "hal_uart.h"
 //#include "hal_usb.h"
 //#include "hal_wdg.h"
-//#include "hal_wspi.h"
+#include "hal_wspi.h"
 
 /*
  *  The ST driver is a special case, it is only included if the OSAL is

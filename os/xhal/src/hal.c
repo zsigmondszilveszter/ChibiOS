@@ -70,10 +70,13 @@ void halInit(void) {
 #if (HAL_USE_ETH == TRUE) || defined(__DOXYGEN__)
   ethInit();
 #endif
-#if 0
 #if (HAL_USE_ADC == TRUE) || defined(__DOXYGEN__)
   adcInit();
 #endif
+#if (HAL_USE_GPT == TRUE) || defined(__DOXYGEN__)
+  gptInit();
+#endif
+#if 0
 #if (HAL_USE_CAN == TRUE) || defined(__DOXYGEN__)
   canInit();
 #endif
@@ -85,9 +88,6 @@ void halInit(void) {
 #endif
 #if (HAL_USE_EFL == TRUE) || defined(__DOXYGEN__)
   eflInit();
-#endif
-#if (HAL_USE_GPT == TRUE) || defined(__DOXYGEN__)
-  gptInit();
 #endif
 #if (HAL_USE_I2C == TRUE) || defined(__DOXYGEN__)
   i2cInit();
@@ -117,6 +117,9 @@ void halInit(void) {
 #if (HAL_USE_RTC == TRUE) || defined(__DOXYGEN__)
   rtcInit();
 #endif
+#if (HAL_USE_WSPI == TRUE) || defined(__DOXYGEN__)
+  wspiInit();
+#endif
 #if 0
 #if (HAL_USE_TRNG == TRUE) || defined(__DOXYGEN__)
   trngInit();
@@ -135,9 +138,6 @@ void halInit(void) {
 #endif
 #if (HAL_USE_WDG == TRUE) || defined(__DOXYGEN__)
   wdgInit();
-#endif
-#if (HAL_USE_WSPI == TRUE) || defined(__DOXYGEN__)
-  wspiInit();
 #endif
 #endif
 
